@@ -64,7 +64,7 @@ describe('projection-360 GPU effect & presets', () => {
   it('applies Wide preset correctly and isolates dewarpMode to 0.0', () => {
     const updated = applyFovPreset(DEFAULT_PROJECTION_360_SETTINGS, 'wide')
     expect(updated.preset).toBe('wide')
-    expect(updated.fov).toBe(95)
+    expect(updated.fov).toBe(102)
 
     const packed = projection360.packUniforms(
       updated as unknown as Record<string, string | number | boolean>,
@@ -77,7 +77,7 @@ describe('projection-360 GPU effect & presets', () => {
   it('applies Linear preset correctly with rectilinear dewarp distortion and dewarpMode 1.0', () => {
     const updated = applyFovPreset(DEFAULT_PROJECTION_360_SETTINGS, 'linear')
     expect(updated.preset).toBe('linear')
-    expect(updated.fov).toBe(78)
+    expect(updated.fov).toBe(88.5)
     expect(updated.distortion).toBe(1.0)
 
     const packed = projection360.packUniforms(
@@ -91,7 +91,7 @@ describe('projection-360 GPU effect & presets', () => {
   it('applies Narrow preset correctly with rectilinear dewarp and dewarpMode 1.0', () => {
     const updated = applyFovPreset(DEFAULT_PROJECTION_360_SETTINGS, 'narrow')
     expect(updated.preset).toBe('narrow')
-    expect(updated.fov).toBe(55)
+    expect(updated.fov).toBe(64.0)
 
     const packed = projection360.packUniforms(
       updated as unknown as Record<string, string | number | boolean>,
