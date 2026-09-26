@@ -9,6 +9,7 @@ import { MaskEditorContainer } from './mask-editor-container'
 import { CornerPinContainer } from './corner-pin-container'
 import { PowerWindowOverlayContainer } from './power-window-overlay'
 import { SpatialEffectPointOverlayContainer } from './spatial-effect-point-overlay'
+import { Projection360OrbitContainer } from './projection-360-orbit-container'
 import { PreviewPerfPanel } from './preview-perf-panel'
 import { PreviewStage } from './preview-stage'
 import { RollingEditOverlay } from './rolling-edit-overlay'
@@ -849,6 +850,7 @@ const VideoPreviewBase = memo(function VideoPreviewBase({
           zoom={zoom}
         />
       )}
+      <Projection360OrbitContainer containerRect={playerContainerRect} />
     </>
   ) : null
   const shouldShowAfterDuringSplitPlayback = isPlayingForSplitComparison

@@ -211,9 +211,17 @@ export const useItemsStore = create<ItemsState & ItemsActions>()((set, get) => (
   _updateItem: (id, updates) => {
     const normalizedUpdates = normalizeItemUpdates(updates)
     return set((state) => {
-      const nextItems = state.items.map((i) =>
-        i.id === id ? normalizeFrameFields({ ...i, ...normalizedUpdates } as typeof i) : i,
-      )
+      const nextItems = state.items.map((i) => {
+        if (i.id !== id) return i
+        const merged = { ...i, ...normalizedUpdates } as typeof i
+        if (
+          'transcriptCaptions' in normalizedUpdates &&
+          normalizedUpdates.transcriptCaptions === undefined
+        ) {
+          delete merged.transcriptCaptions
+        }
+        return normalizeFrameFields(merged)
+      })
       return withItemIndexes(nextItems, state)
     })
   },

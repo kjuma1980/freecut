@@ -21,7 +21,8 @@ import {
   Sticker,
   WandSparkles,
 } from 'lucide-react'
-import { motion, useReducedMotion } from 'motion/react'
+import { motion } from 'motion/react'
+import { usePrefersReducedMotion } from '@/shared/hooks/use-prefers-reduced-motion'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/shared/ui/cn'
 import { useEditorStore } from '@/shared/state/editor'
@@ -299,7 +300,7 @@ export const MediaSidebar = memo(function MediaSidebar() {
   const setActiveTab = useEditorStore((s) => s.setActiveTab)
   const sidebarWidth = useEditorStore((s) => s.sidebarWidth)
   const setSidebarWidth = useEditorStore((s) => s.setSidebarWidth)
-  const prefersReducedMotion = useReducedMotion()
+  const prefersReducedMotion = usePrefersReducedMotion()
 
   const [aiTabActivated, setAiTabActivated] = useState(activeTab === 'ai')
   // The Lottie panel hits an external API on mount, so keep it unmounted until

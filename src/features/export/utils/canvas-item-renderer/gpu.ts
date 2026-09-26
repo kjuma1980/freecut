@@ -454,12 +454,19 @@ export function renderPreviewVideoGpuEffectsToCanvas(
     })
   }
 
+  const hasSpherical360 = enabledEffects.some(
+    (e) =>
+      e.effect.type === 'gpu-effect' &&
+      e.effect.gpuEffectType === 'gpu-projection-360' &&
+      e.effect.params?.sourceMode === 'spherical_360',
+  )
   const drawLayout = calculateContainedMediaDrawLayout(
     video.videoWidth,
     video.videoHeight,
     transform,
     rctx.canvasSettings,
     undefined,
+    hasSpherical360 ? 'fill' : 'contain',
   )
   if (hasCropFeather(drawLayout.featherPixels)) {
     recordFastPath('crop-feather')

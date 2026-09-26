@@ -1060,6 +1060,19 @@ export function usePreviewRendererController({
     const scrubRendererMatchesStructure =
       scrubRendererStructureKeyRef.current === fastScrubRendererStructureKey
     if (!scrubRenderer || !scrubRendererMatchesStructure) {
+      if (forceFastScrubOverlay) {
+        void ensureFastScrubRenderer().then((renderer) => {
+          if (!renderer) return
+          const playbackState = usePlaybackStore.getState()
+          const targetFrame = playbackState.previewFrame ?? playbackState.currentFrame
+          renderer.invalidateFrameCache({ frames: [targetFrame] })
+          if (scrubOffscreenRenderedFrameRef.current === targetFrame) {
+            scrubOffscreenRenderedFrameRef.current = null
+          }
+          scrubRequestedFrameRef.current = targetFrame
+          void resumeScrubLoopRef.current()
+        })
+      }
       return
     }
 
@@ -1082,6 +1095,7 @@ export function usePreviewRendererController({
     scrubRequestedFrameRef.current = targetFrame
     void resumeScrubLoopRef.current()
   }, [
+    ensureFastScrubRenderer,
     fastScrubRendererStructureKey,
     forceFastScrubOverlay,
     committedPreviewSnapshotRef,
@@ -1094,6 +1108,27 @@ export function usePreviewRendererController({
     scrubRequestedFrameRef,
     showFastScrubOverlayRef,
     showPlaybackTransitionOverlayRef,
+  ])
+
+  useEffect(() => {
+    if (!forceFastScrubOverlay) return
+    const playbackState = usePlaybackStore.getState()
+    const targetFrame = playbackState.previewFrame ?? playbackState.currentFrame
+    void ensureFastScrubRenderer().then((renderer) => {
+      if (!renderer) return
+      renderer.invalidateFrameCache({ frames: [targetFrame] })
+      if (scrubOffscreenRenderedFrameRef.current === targetFrame) {
+        scrubOffscreenRenderedFrameRef.current = null
+      }
+      scrubRequestedFrameRef.current = targetFrame
+      void resumeScrubLoopRef.current()
+    })
+  }, [
+    forceFastScrubOverlay,
+    ensureFastScrubRenderer,
+    resumeScrubLoopRef,
+    scrubOffscreenRenderedFrameRef,
+    scrubRequestedFrameRef,
   ])
 
   useEffect(() => {
