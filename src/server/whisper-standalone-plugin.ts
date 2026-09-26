@@ -3,6 +3,7 @@ import { spawn, type ChildProcess } from 'node:child_process'
 import { existsSync, mkdirSync, unlinkSync, readFileSync, createWriteStream } from 'node:fs'
 import { join, extname } from 'node:path'
 import { tmpdir } from 'node:os'
+import { fileURLToPath } from 'node:url'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 
 interface WhisperStatus {
@@ -97,7 +98,10 @@ function executeWhisper(
   isTempAudioPath = isTemp
   activeTempOutputPath = join(tempDir, `out_${timestamp}.json`)
 
-  const scriptPath = join(process.cwd(), 'scripts', 'whisper_transcribe.py')
+  const cwdScriptPath = join(process.cwd(), 'scripts', 'whisper_transcribe.py')
+  const scriptPath = existsSync(cwdScriptPath)
+    ? cwdScriptPath
+    : fileURLToPath(new URL('../../scripts/whisper_transcribe.py', import.meta.url))
   const args = [
     scriptPath,
     '--audio',
@@ -166,175 +170,170 @@ export function whisperStandalonePlugin(): Plugin {
   return {
     name: 'freecut-whisper-standalone',
     configureServer(server: ViteDevServer) {
-      server.middlewares.use(async (req: IncomingMessage, res: ServerResponse, next: () => void) => {
-        const url = req.url?.split('?')[0] || ''
+      server.middlewares.use(
+        async (req: IncomingMessage, res: ServerResponse, next: () => void) => {
+          const url = req.url?.split('?')[0] || ''
 
-        // 1. GET /api/whisper/status
-        if (url === '/api/whisper/status' && req.method === 'GET') {
-          res.setHeader('Content-Type', 'application/json')
-          try {
-            const status: WhisperStatus = {
-              available: true,
-              backend: 'faster-whisper-cuda',
-              cuda: true,
-              gpuName: 'NVIDIA GeForce RTX 3090',
-              isBusy: activeProcess !== null,
-              supportedModels: [
-                'large-v3',
-                'large-v3-turbo',
-                'medium',
-                'small',
-                'base',
-                'tiny',
-              ],
-            }
-            res.statusCode = 200
-            res.end(JSON.stringify(status))
-          } catch (err) {
-            res.statusCode = 500
-            res.end(JSON.stringify({ error: String(err) }))
-          }
-          return
-        }
-
-        // 2. POST /api/whisper/cancel
-        if (url === '/api/whisper/cancel' && req.method === 'POST') {
-          res.setHeader('Content-Type', 'application/json')
-          if (activeProcess) {
+          // 1. GET /api/whisper/status
+          if (url === '/api/whisper/status' && req.method === 'GET') {
+            res.setHeader('Content-Type', 'application/json')
             try {
-              activeProcess.kill('SIGKILL')
-            } catch {
-              // Ignore
+              const status: WhisperStatus = {
+                available: true,
+                backend: 'faster-whisper-cuda',
+                cuda: true,
+                gpuName: 'NVIDIA GeForce RTX 3090',
+                isBusy: activeProcess !== null,
+                supportedModels: ['large-v3', 'large-v3-turbo', 'medium', 'small', 'base', 'tiny'],
+              }
+              res.statusCode = 200
+              res.end(JSON.stringify(status))
+            } catch (err) {
+              res.statusCode = 500
+              res.end(JSON.stringify({ error: String(err) }))
             }
-            activeProcess = null
-          }
-          cleanupTempFiles()
-          res.statusCode = 200
-          res.end(JSON.stringify({ cancelled: true }))
-          return
-        }
-
-        // 3. POST /api/whisper/transcribe
-        if (url === '/api/whisper/transcribe' && req.method === 'POST') {
-          if (activeProcess) {
-            res.statusCode = 409
-            res.setHeader('Content-Type', 'application/json')
-            res.end(JSON.stringify({ error: 'Ya hay una transcripción en curso.' }))
             return
           }
 
-          const contentType = req.headers['content-type'] || ''
-
-          // A) Direct local file transcription request via JSON metadata
-          if (contentType.includes('application/json')) {
-            let body = ''
-            req.on('data', (chunk: Buffer) => {
-              body += chunk.toString('utf-8')
-            })
-            req.on('end', () => {
-              let parsed: {
-                mediaId?: string
-                fileName?: string
-                workspaceName?: string
-                model?: string
-                language?: string
-                device?: string
-              }
+          // 2. POST /api/whisper/cancel
+          if (url === '/api/whisper/cancel' && req.method === 'POST') {
+            res.setHeader('Content-Type', 'application/json')
+            if (activeProcess) {
               try {
-                parsed = JSON.parse(body)
+                activeProcess.kill('SIGKILL')
               } catch {
-                res.statusCode = 400
-                res.setHeader('Content-Type', 'application/json')
-                res.end(JSON.stringify({ error: 'JSON inválido' }))
-                return
+                // Ignore
               }
-
-              const {
-                mediaId,
-                fileName,
-                workspaceName,
-                model = 'large-v3-turbo',
-                language = 'auto',
-                device = 'cuda',
-              } = parsed
-
-              if (!mediaId || !fileName) {
-                res.statusCode = 400
-                res.setHeader('Content-Type', 'application/json')
-                res.end(JSON.stringify({ error: 'Faltan mediaId o fileName' }))
-                return
-              }
-
-              const localFile = findLocalMediaFile(mediaId, fileName, workspaceName)
-              if (!localFile) {
-                res.statusCode = 404
-                res.setHeader('Content-Type', 'application/json')
-                res.end(
-                  JSON.stringify({
-                    notFound: true,
-                    error: 'No se encontró el archivo en disco local',
-                  }),
-                )
-                return
-              }
-
-              executeWhisper(localFile, false, model, language, device, res)
-            })
+              activeProcess = null
+            }
+            cleanupTempFiles()
+            res.statusCode = 200
+            res.end(JSON.stringify({ cancelled: true }))
             return
           }
 
-          // B) Binary stream upload (fallback, streamed without memory limits)
-          const model = (req.headers['x-whisper-model'] as string) || 'large-v3-turbo'
-          const language = (req.headers['x-whisper-language'] as string) || 'auto'
-          const device = (req.headers['x-whisper-device'] as string) || 'cuda'
-          const rawFileName = req.headers['x-media-filename']
-            ? decodeURIComponent(req.headers['x-media-filename'] as string)
-            : ''
-          const fileExt = extname(rawFileName) || '.mp4'
-
-          const timestamp = Date.now()
-          const tempDir = join(tmpdir(), 'freecut_whisper')
-          if (!existsSync(tempDir)) {
-            mkdirSync(tempDir, { recursive: true })
-          }
-
-          const tempAudioPath = join(tempDir, `audio_${timestamp}${fileExt}`)
-          const fileStream = createWriteStream(tempAudioPath)
-          let bytesReceived = 0
-
-          req.on('data', (chunk: Buffer) => {
-            bytesReceived += chunk.length
-          })
-
-          req.pipe(fileStream)
-
-          fileStream.on('error', (err) => {
-            cleanupTempFiles()
-            res.statusCode = 500
-            res.setHeader('Content-Type', 'application/json')
-            res.end(
-              JSON.stringify({
-                error: `Error guardando archivo de audio temporal: ${err.message}`,
-              }),
-            )
-          })
-
-          fileStream.on('finish', () => {
-            if (bytesReceived === 0) {
-              cleanupTempFiles()
-              res.statusCode = 400
+          // 3. POST /api/whisper/transcribe
+          if (url === '/api/whisper/transcribe' && req.method === 'POST') {
+            if (activeProcess) {
+              res.statusCode = 409
               res.setHeader('Content-Type', 'application/json')
-              res.end(JSON.stringify({ error: 'Audio buffer vacío' }))
+              res.end(JSON.stringify({ error: 'Ya hay una transcripción en curso.' }))
               return
             }
 
-            executeWhisper(tempAudioPath, true, model, language, device, res)
-          })
-          return
-        }
+            const contentType = req.headers['content-type'] || ''
 
-        next()
-      })
+            // A) Direct local file transcription request via JSON metadata
+            if (contentType.includes('application/json')) {
+              let body = ''
+              req.on('data', (chunk: Buffer) => {
+                body += chunk.toString('utf-8')
+              })
+              req.on('end', () => {
+                let parsed: {
+                  mediaId?: string
+                  fileName?: string
+                  workspaceName?: string
+                  model?: string
+                  language?: string
+                  device?: string
+                }
+                try {
+                  parsed = JSON.parse(body)
+                } catch {
+                  res.statusCode = 400
+                  res.setHeader('Content-Type', 'application/json')
+                  res.end(JSON.stringify({ error: 'JSON inválido' }))
+                  return
+                }
+
+                const {
+                  mediaId,
+                  fileName,
+                  workspaceName,
+                  model = 'large-v3-turbo',
+                  language = 'auto',
+                  device = 'cuda',
+                } = parsed
+
+                if (!mediaId || !fileName) {
+                  res.statusCode = 400
+                  res.setHeader('Content-Type', 'application/json')
+                  res.end(JSON.stringify({ error: 'Faltan mediaId o fileName' }))
+                  return
+                }
+
+                const localFile = findLocalMediaFile(mediaId, fileName, workspaceName)
+                if (!localFile) {
+                  res.statusCode = 404
+                  res.setHeader('Content-Type', 'application/json')
+                  res.end(
+                    JSON.stringify({
+                      notFound: true,
+                      error: 'No se encontró el archivo en disco local',
+                    }),
+                  )
+                  return
+                }
+
+                executeWhisper(localFile, false, model, language, device, res)
+              })
+              return
+            }
+
+            // B) Binary stream upload (fallback, streamed without memory limits)
+            const model = (req.headers['x-whisper-model'] as string) || 'large-v3-turbo'
+            const language = (req.headers['x-whisper-language'] as string) || 'auto'
+            const device = (req.headers['x-whisper-device'] as string) || 'cuda'
+            const rawFileName = req.headers['x-media-filename']
+              ? decodeURIComponent(req.headers['x-media-filename'] as string)
+              : ''
+            const fileExt = extname(rawFileName) || '.mp4'
+
+            const timestamp = Date.now()
+            const tempDir = join(tmpdir(), 'freecut_whisper')
+            if (!existsSync(tempDir)) {
+              mkdirSync(tempDir, { recursive: true })
+            }
+
+            const tempAudioPath = join(tempDir, `audio_${timestamp}${fileExt}`)
+            const fileStream = createWriteStream(tempAudioPath)
+            let bytesReceived = 0
+
+            req.on('data', (chunk: Buffer) => {
+              bytesReceived += chunk.length
+            })
+
+            req.pipe(fileStream)
+
+            fileStream.on('error', (err) => {
+              cleanupTempFiles()
+              res.statusCode = 500
+              res.setHeader('Content-Type', 'application/json')
+              res.end(
+                JSON.stringify({
+                  error: `Error guardando archivo de audio temporal: ${err.message}`,
+                }),
+              )
+            })
+
+            fileStream.on('finish', () => {
+              if (bytesReceived === 0) {
+                cleanupTempFiles()
+                res.statusCode = 400
+                res.setHeader('Content-Type', 'application/json')
+                res.end(JSON.stringify({ error: 'Audio buffer vacío' }))
+                return
+              }
+
+              executeWhisper(tempAudioPath, true, model, language, device, res)
+            })
+            return
+          }
+
+          next()
+        },
+      )
     },
   }
 }

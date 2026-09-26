@@ -1,4 +1,4 @@
-import type { TranscriptSegment, TranscribeOptions } from '../types'
+import type { TranscribeOptions } from '../types'
 import { ExternalTranscribeStream } from './external-transcribe-stream'
 import type { MediaTranscriber } from '../adapter-types'
 
@@ -25,6 +25,10 @@ export class WhisperLocalTranscriber implements MediaTranscriber {
           throw new Error(
             `El servicio local de Whisper no respondió correctamente (${statusRes.status}).`,
           )
+        }
+        const statusData = (await statusRes.json()) as { available?: boolean }
+        if (!statusData?.available) {
+          throw new Error('El servicio local de Whisper no está disponible.')
         }
       } catch (err) {
         if (signal.aborted) throw new Error('Transcripción cancelada')
@@ -121,7 +125,12 @@ export class WhisperLocalTranscriber implements MediaTranscriber {
           end: typeof seg.end === 'number' ? seg.end : 0,
           words: Array.isArray(seg.words)
             ? (seg.words as Array<Record<string, unknown>>).map((w) => ({
-                text: (typeof w.word === 'string' ? w.word : typeof w.text === 'string' ? w.text : '').trim(),
+                text: (typeof w.word === 'string'
+                  ? w.word
+                  : typeof w.text === 'string'
+                    ? w.text
+                    : ''
+                ).trim(),
                 start: typeof w.start === 'number' ? w.start : 0,
                 end: typeof w.end === 'number' ? w.end : 0,
                 confidence: typeof w.probability === 'number' ? w.probability : undefined,
