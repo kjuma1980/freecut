@@ -91,7 +91,6 @@ fn projection360Fragment(input: VertexOutput) -> @location(0) vec4f {
       //   UltraWide (fov >= 105.0): k = 0.42 -> genuine wide action-cam fisheye / gran angular de ojo de pez.
       //   Wide (fov < 105.0): k = 0.21 -> action-cam angular moderado.
       // - Modo Libre (dewarpMode >= 1.5): Continuous slider from 0% flat rectilinear to 100% fisheye.
-      let r2 = xp * xp + (yp * aspect) * (yp * aspect);
       var k = 0.0;
       if (params.dewarpMode >= 1.5) {
         k = clamp(params.distortion, 0.0, 1.0) * 0.42;
@@ -104,12 +103,20 @@ fn projection360Fragment(input: VertexOutput) -> @location(0) vec4f {
       } else {
         k = 0.0;
       }
+
+      // Auto-fit framing scale to eliminate black borders in UltraWide and Wide,
+      // ensuring full 100% frame coverage matching Insta360 Studio (fitScale = 1.0 for Linear / Narrow)
+      let fitScale = 1.0 / (1.0 + k * 0.46);
+      let fx = xp * fitScale;
+      let fy = yp * fitScale;
+
+      let r2 = fx * fx + (fy * aspect) * (fy * aspect);
       let scale = 1.0 + k * r2;
 
-      let u = 0.5 + xp * scale;
-      let v = 0.5 + yp * aspect * scale;
+      let u = 0.5 + fx * scale;
+      let v = 0.5 + fy * aspect * scale;
 
-      inBounds = (u >= 0.0 && u <= 1.0 && v >= 0.0 && v <= 1.0);
+      inBounds = true;
       sampleUv = clamp(vec2f(u, v), vec2f(0.0001), vec2f(0.9999));
     } else {
       // ============================================================
