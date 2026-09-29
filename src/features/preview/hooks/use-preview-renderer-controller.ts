@@ -991,10 +991,18 @@ export function usePreviewRendererController({
     ) {
       scrubRequestedFrameRef.current = targetFrame
       void resumeScrubLoopRef.current()
+    } else if (!scrubRenderer && currentFrameInvalidated && forceFastScrubOverlay) {
+      void ensureFastScrubRenderer().then((renderer) => {
+        if (renderer) {
+          scrubRequestedFrameRef.current = targetFrame
+          void resumeScrubLoopRef.current()
+        }
+      })
     }
   }, [
     bgTransitionRendererRef,
     bgTransitionRendererStructureKeyRef,
+    ensureFastScrubRenderer,
     fastScrubRendererStructureKey,
     fastScrubScaledKeyframes,
     fastScrubScaledTracks,
@@ -1363,15 +1371,14 @@ export function usePreviewRendererController({
                 return null
               }
 
-              if (scrubOffscreenRenderedFrameRef.current !== request.frame) {
-                // Only the render pump may render into and tag the shared
-                // offscreen surface. A warm request can outlive an edit and
-                // overlap a ruler skim; rendering here would let both owners
-                // clear the same canvas and publish a black/stale frame.
-                scrubRequestedFrameRef.current = request.frame
-                return true
+              try {
+                renderer.invalidateFrameCache?.({ frames: warmRunwayFrames })
+              } catch {
+                // Best effort
               }
-              return false
+              scrubOffscreenRenderedFrameRef.current = null
+              scrubRequestedFrameRef.current = request.frame
+              return true
             })
             if (shouldResumeRenderPump) {
               void resumeScrubLoopRef.current()

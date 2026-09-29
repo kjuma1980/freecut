@@ -576,6 +576,15 @@ const VideoPreviewBase = memo(function VideoPreviewBase({
   useEffect(() => {
     const wasForced = previousForceFastScrubOverlayRef.current
     previousForceFastScrubOverlayRef.current = forceFastScrubOverlay
+    if (!wasForced && forceFastScrubOverlay) {
+      const playback = usePlaybackStore.getState()
+      const currentFrame = playback.previewFrame ?? playback.currentFrame
+      usePreviewBridgeStore.getState().requestPostEditWarm(
+        currentFrame,
+        items.map((i) => i.id),
+      )
+      return
+    }
     if (!wasForced || forceFastScrubOverlay) return
 
     const playbackState = usePlaybackStore.getState()
@@ -594,6 +603,7 @@ const VideoPreviewBase = memo(function VideoPreviewBase({
     forceFastScrubOverlay,
     hideFastScrubOverlay,
     isPausedTransitionOverlayActive,
+    items,
     setDisplayedFrame,
   ])
   const shouldPreferPlayerForPreview = useCallback(
@@ -953,7 +963,7 @@ const VideoPreviewBase = memo(function VideoPreviewBase({
         effectivePlayerDisplayedFrame === comparisonTargetFrame)
   const stageRenderedOverlayVisible = isColorGradeComparisonActive
     ? isRenderedOverlayVisible && isColorGradeComparisonFrameReady
-    : isRenderedOverlayVisible
+    : isRenderedOverlayVisible || forceFastScrubOverlay
   const isSplitAfterVisible = isSplitGradeComparison && stageRenderedOverlayVisible
 
   return (

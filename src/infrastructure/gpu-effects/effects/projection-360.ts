@@ -1,8 +1,5 @@
 import type { GpuEffectDefinition } from '../types'
-import {
-  DEFAULT_PROJECTION_360_SETTINGS,
-  type HorizonLockMode,
-} from '@/types/projection360'
+import { DEFAULT_PROJECTION_360_SETTINGS, type HorizonLockMode } from '@/types/projection360'
 
 const PROJECTION_360_SHADER = /* wgsl */ `
 struct Projection360Params {
@@ -58,96 +55,59 @@ fn projection360Fragment(input: VertexOutput) -> @location(0) vec4f {
     // MODE 0: Planar Lens Dewarp & FOV (UltraWide / Action Cam)
     // ============================================================
     if (params.sourceMode < 0.5) {
-      var coord = (input.uv - vec2f(0.5)) * vec2f(aspect, 1.0) * 2.0;
+      let zoom = max(params.distance, 0.05);
+      let xs = (input.uv.x - 0.5) / zoom;
+      let ys = (input.uv.y - 0.5) / (zoom * aspect);
 
-      if (params.dewarpMode < 0.5) {
-        // --------------------------------------------------------
-        // SUBMODE A: UltraWide & Wide (Native Action Cam Lens)
-        // Preserves 100% of native curved lens optics without
-        // flattening (exact appearance approved by user)
-        // --------------------------------------------------------
-        let baseFovRad = 110.0 * (PI / 180.0);
-        let targetFovRad = clamp(params.fov, 30.0, 150.0) * (PI / 180.0);
-        let fovRatio = tan(baseFovRad * 0.5) / max(tan(targetFovRad * 0.5), 0.001);
-        let fovZoom = pow(fovRatio, 0.45);
-        let totalZoom = fovZoom * max(params.distance, 0.1);
-        coord = coord / totalZoom;
+      // 1. Roll & Horizon Lock
+      let cosR = cos(effectiveRoll);
+      let sinR = sin(effectiveRoll);
+      let r1x = xs * cosR - ys * sinR;
+      let r1y = xs * sinR + ys * cosR;
+      let r1z = 1.0;
 
-        // 1. Horizon Roll
-        let cosR = cos(effectiveRoll);
-        let sinR = sin(effectiveRoll);
-        coord = vec2f(coord.x * cosR - coord.y * sinR, coord.x * sinR + coord.y * cosR);
+      // 2. Pitch
+      let cosP = cos(pitchRad);
+      let sinP = sin(pitchRad);
+      let r2x = r1x;
+      let r2y = r1y * cosP - r1z * sinP;
+      let r2z = r1y * sinP + r1z * cosP;
 
-        // 2. 3D Perspective Tilt (Yaw & Pitch)
-        let ray = normalize(vec3f(coord.x, -coord.y, 1.0));
-        let cosP = cos(pitchRad);
-        let sinP = sin(pitchRad);
-        let rX = vec3f(ray.x, ray.y * cosP - ray.z * sinP, ray.y * sinP + ray.z * cosP);
-        let cosY = cos(yawRad);
-        let sinY = sin(yawRad);
-        let rY = vec3f(rX.x * cosY + rX.z * sinY, rX.y, -rX.x * sinY + rX.z * cosY);
-        if (rY.z > 0.05) {
-          coord = vec2f(rY.x / rY.z, -rY.y / rY.z);
+      // 3. Yaw
+      let cosY = cos(yawRad);
+      let sinY = sin(yawRad);
+      let r3x = r2x * cosY + r2z * sinY;
+      let r3y = r2y;
+      let r3z = -r2x * sinY + r2z * cosY;
+
+      let rz = max(r3z, 0.001);
+      let xp = r3x / rz;
+      let yp = r3y / rz;
+
+      // Curvature & Optical Projection:
+      // - Submode B (dewarpMode == 1.0): Linear, Narrow, 45° Lock, 360° Lock
+      //   k = 0.0 -> scale = 1.0 -> 100% straight rectilinear lines, ZERO U-sagging, ZERO lateral bowing.
+      // - Submode A (dewarpMode == 0.0): Fisheye / Angular action-cam optics
+      //   UltraWide (fov >= 105.0): k = 0.42 -> genuine wide action-cam fisheye / gran angular de ojo de pez.
+      //   Wide (fov < 105.0): k = 0.21 -> action-cam angular moderado.
+      // - Modo Libre (dewarpMode >= 1.5): Continuous slider from 0% flat rectilinear to 100% fisheye.
+      let r2 = xp * xp + (yp * aspect) * (yp * aspect);
+      var k = 0.0;
+      if (params.dewarpMode >= 1.5) {
+        k = clamp(params.distortion, 0.0, 1.0) * 0.42;
+      } else if (params.dewarpMode < 0.5) {
+        if (params.fov >= 105.0) {
+          k = 0.42;
+        } else {
+          k = 0.21;
         }
       } else {
-        // --------------------------------------------------------
-        // SUBMODE B: Linear, Narrow, 45° & 360° Horizont
-        // Exact 3D Pinhole-to-Equisolid Camera Ray Dewarping
-        // Replicating Insta360 Studio Linear (Zero Curvature / 100% Flat)
-        // --------------------------------------------------------
-        let targetFovRad = clamp(params.fov, 30.0, 150.0) * (PI / 180.0);
-        let tanHalfFov = tan(targetFovRad * 0.5);
-
-        // Rectilinear pinhole ray on output screen (normalized by aspect)
-        let xu = (input.uv.x - 0.5) * 2.0 * tanHalfFov;
-        let yu = -(input.uv.y - 0.5) * 2.0 * (tanHalfFov / aspect);
-        let zu = max(params.distance, 0.1);
-
-        // 1. Roll & Horizon Lock
-        let cosR = cos(effectiveRoll);
-        let sinR = sin(effectiveRoll);
-        let rZ = vec3f(xu * cosR - yu * sinR, xu * sinR + yu * cosR, zu);
-
-        // 2. Pitch
-        let cosP = cos(pitchRad);
-        let sinP = sin(pitchRad);
-        let rX = vec3f(rZ.x, rZ.y * cosP - rZ.z * sinP, rZ.y * sinP + rZ.z * cosP);
-
-        // 3. Yaw
-        let cosY = cos(yawRad);
-        let sinY = sin(yawRad);
-        let rY = vec3f(rX.x * cosY + rX.z * sinY, rX.y, -rX.x * sinY + rX.z * cosY);
-
-        if (rY.z > 0.02) {
-          let rayLen = length(rY);
-          let ray = rY / rayLen;
-          let theta = acos(clamp(ray.z, -1.0, 1.0));
-          let rxy = max(length(vec2f(ray.x, ray.y)), 0.00001);
-          let dir = vec2f(ray.x, ray.y) / rxy;
-
-          // Camera lens equisolid mapping:
-          // In native action cam video, a point at angle theta projects to:
-          // rd = 2 * sin(theta / 2)
-          // Base native lens horizontal FOV is 110 deg (55 deg half-FOV)
-          let baseHalfFov = 55.0 * (PI / 180.0);
-          let baseRd = 2.0 * sin(baseHalfFov * 0.5);
-          let equiScale = (2.0 * sin(theta * 0.5)) / max(baseRd, 0.0001);
-
-          let d = clamp(params.distortion, 0.0, 1.0);
-          let rectScale = tan(theta) / max(tan(baseHalfFov), 0.0001);
-          let lensScale = mix(rectScale, equiScale, d);
-
-          // Map back to input video UV (with aspect ratio preservation)
-          let sampleX = (dir.x * lensScale) * 0.5 + 0.5;
-          let sampleY = (-dir.y * lensScale * aspect) * 0.5 + 0.5;
-
-          coord = vec2f((sampleX - 0.5) * 2.0 * aspect, (sampleY - 0.5) * 2.0);
-        }
+        k = 0.0;
       }
+      let scale = 1.0 + k * r2;
 
-      // Map back to [0..1] UV space
-      let u = (coord.x / aspect) * 0.5 + 0.5;
-      let v = coord.y * 0.5 + 0.5;
+      let u = 0.5 + xp * scale;
+      let v = 0.5 + yp * aspect * scale;
 
       inBounds = (u >= 0.0 && u <= 1.0 && v >= 0.0 && v <= 1.0);
       sampleUv = clamp(vec2f(u, v), vec2f(0.0001), vec2f(0.9999));
@@ -361,9 +321,9 @@ export const projection360: GpuEffectDefinition = {
     ) {
       isDewarpMode = 1.0
     } else if (preset === 'custom') {
-      isDewarpMode = distortion > 0.05 ? 1.0 : 0.0
+      isDewarpMode = 2.0
     } else {
-      isDewarpMode = distortion > 0.3 ? 1.0 : 0.0
+      isDewarpMode = 2.0
     }
 
     return new Float32Array([
