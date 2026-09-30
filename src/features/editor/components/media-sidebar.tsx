@@ -26,9 +26,11 @@ import {
   Check,
   X,
   Sparkles,
+  Trash2,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { useGizmoStore } from '@/features/editor/deps/preview'
+import { usePreviewBridgeStore } from '@/shared/state/preview-bridge'
 import { AudioTabPanel } from './audio-tab'
 import type { ItemEffect } from '@/types/effects'
 import { motion } from 'motion/react'
@@ -496,12 +498,37 @@ export const MediaSidebar = memo(function MediaSidebar() {
 
   const selectedItemIds = useSelectionStore((s) => s.selectedItemIds)
   const timelineItems = useTimelineStore((s) => s.items)
-  const hasSelectedVisualClip = useMemo(() => {
-    return selectedItemIds.some((id) => {
-      const item = timelineItems.find((i) => i.id === id)
-      return item && item.type !== 'audio'
-    })
+  const selectedVisualItems = useMemo(() => {
+    return timelineItems.filter((i) => selectedItemIds.includes(i.id) && i.type !== 'audio')
   }, [timelineItems, selectedItemIds])
+
+  const selectedVisualItemEffectsCount = useMemo(() => {
+    return selectedVisualItems.reduce((acc, item) => acc + (item.effects?.length || 0), 0)
+  }, [selectedVisualItems])
+
+  const hasSelectedVisualClip = selectedVisualItems.length > 0
+
+  const handleClearSelectedClipEffects = useCallback(() => {
+    if (selectedVisualItems.length === 0) {
+      toast.warning('Selecciona un clip en la línea de tiempo primero')
+      return
+    }
+    const { clearEffects, items } = useTimelineStore.getState()
+    selectedVisualItems.forEach((item) => {
+      clearEffects(item.id)
+    })
+    if (isPreviewingOnPlayer) {
+      useGizmoStore.getState().clearPreview()
+      setIsPreviewingOnPlayer(false)
+    }
+    const currentFrame = usePlaybackStore.getState().currentFrame
+    usePreviewBridgeStore.getState().requestPostEditWarm(
+      currentFrame,
+      items.map((i) => i.id),
+    )
+    usePreviewBridgeStore.getState().setDisplayedFrame(null)
+    toast.success('Efectos eliminados del clip')
+  }, [selectedVisualItems, isPreviewingOnPlayer])
 
   // Clear live preview when switching away from effects tab or unmounting
   useEffect(() => {
@@ -509,6 +536,13 @@ export const MediaSidebar = memo(function MediaSidebar() {
       if (isPreviewingOnPlayer) {
         useGizmoStore.getState().clearPreview()
         setIsPreviewingOnPlayer(false)
+        const currentFrame = usePlaybackStore.getState().currentFrame
+        const { items } = useTimelineStore.getState()
+        usePreviewBridgeStore.getState().requestPostEditWarm(
+          currentFrame,
+          items.map((i) => i.id),
+        )
+        usePreviewBridgeStore.getState().setDisplayedFrame(null)
       }
       setInspectingEffect(null)
     }
@@ -528,6 +562,13 @@ export const MediaSidebar = memo(function MediaSidebar() {
       if (isPreviewingOnPlayer) {
         useGizmoStore.getState().clearPreview()
         setIsPreviewingOnPlayer(false)
+        const currentFrame = usePlaybackStore.getState().currentFrame
+        const { items } = useTimelineStore.getState()
+        usePreviewBridgeStore.getState().requestPostEditWarm(
+          currentFrame,
+          items.map((i) => i.id),
+        )
+        usePreviewBridgeStore.getState().setDisplayedFrame(null)
       }
       setInspectingEffect({
         kind: 'preset',
@@ -548,6 +589,13 @@ export const MediaSidebar = memo(function MediaSidebar() {
       if (isPreviewingOnPlayer) {
         useGizmoStore.getState().clearPreview()
         setIsPreviewingOnPlayer(false)
+        const currentFrame = usePlaybackStore.getState().currentFrame
+        const { items } = useTimelineStore.getState()
+        usePreviewBridgeStore.getState().requestPostEditWarm(
+          currentFrame,
+          items.map((i) => i.id),
+        )
+        usePreviewBridgeStore.getState().setDisplayedFrame(null)
       }
       setInspectingEffect({
         kind: 'gpu',
@@ -563,6 +611,13 @@ export const MediaSidebar = memo(function MediaSidebar() {
     if (isPreviewingOnPlayer) {
       useGizmoStore.getState().clearPreview()
       setIsPreviewingOnPlayer(false)
+      const currentFrame = usePlaybackStore.getState().currentFrame
+      const { items } = useTimelineStore.getState()
+      usePreviewBridgeStore.getState().requestPostEditWarm(
+        currentFrame,
+        items.map((i) => i.id),
+      )
+      usePreviewBridgeStore.getState().setDisplayedFrame(null)
     }
     setInspectingEffect(null)
   }, [isPreviewingOnPlayer])
@@ -574,6 +629,13 @@ export const MediaSidebar = memo(function MediaSidebar() {
     if (isPreviewingOnPlayer) {
       useGizmoStore.getState().clearPreview()
       setIsPreviewingOnPlayer(false)
+      const currentFrame = usePlaybackStore.getState().currentFrame
+      const { items } = useTimelineStore.getState()
+      usePreviewBridgeStore.getState().requestPostEditWarm(
+        currentFrame,
+        items.map((i) => i.id),
+      )
+      usePreviewBridgeStore.getState().setDisplayedFrame(null)
       return
     }
 
@@ -1155,6 +1217,59 @@ export const MediaSidebar = memo(function MediaSidebar() {
               className={`min-h-0 flex-1 overflow-y-auto p-3 ${activeTab === 'effects' ? 'block' : 'hidden'}`}
             >
               <div className="space-y-3">
+                {/* Selected Clip Effects Status & Clear Button */}
+                {selectedVisualItems.length > 0 ? (
+                  <div className="rounded-lg border border-border bg-secondary/30 p-2.5 space-y-2">
+                    <div className="flex items-center justify-between text-xs">
+                      <div className="flex items-center gap-1.5 min-w-0">
+                        <Film className="w-3.5 h-3.5 text-primary shrink-0" />
+                        <span className="font-medium text-foreground truncate max-w-[150px]">
+                          {selectedVisualItems[0]?.label || 'Clip seleccionado'}
+                        </span>
+                      </div>
+                      <span className="text-[10px] text-muted-foreground bg-secondary px-1.5 py-0.5 rounded shrink-0">
+                        {selectedVisualItemEffectsCount}{' '}
+                        {selectedVisualItemEffectsCount === 1 ? 'efecto' : 'efectos'}
+                      </span>
+                    </div>
+
+                    {selectedVisualItemEffectsCount > 0 && (
+                      <Button
+                        size="sm"
+                        variant="destructive"
+                        onClick={handleClearSelectedClipEffects}
+                        className="w-full h-7 text-xs gap-1.5"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                        <span>Limpiar todos los efectos ({selectedVisualItemEffectsCount})</span>
+                      </Button>
+                    )}
+
+                    {selectedVisualItemEffectsCount === 0 && isPreviewingOnPlayer && (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={handleCloseEffectInspector}
+                        className="w-full h-7 text-xs gap-1.5 text-muted-foreground hover:text-foreground"
+                      >
+                        <X className="w-3.5 h-3.5" />
+                        <span>Quitar preview del reproductor</span>
+                      </Button>
+                    )}
+
+                    {selectedVisualItemEffectsCount === 0 && !isPreviewingOnPlayer && (
+                      <div className="text-[10px] text-muted-foreground">
+                        Sin efectos aplicados en el clip
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  <div className="rounded-lg border border-dashed border-border p-2 text-center">
+                    <span className="text-[10px] text-muted-foreground">
+                      Selecciona un clip en la línea de tiempo para ver o limpiar sus efectos
+                    </span>
+                  </div>
+                )}
                 {/* Active Effect Inspection & Preview Card */}
                 {inspectingEffect && (
                   <div className="rounded-lg border border-primary/40 bg-secondary/30 p-3 shadow-md space-y-2.5">

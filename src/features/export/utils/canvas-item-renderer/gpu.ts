@@ -292,6 +292,17 @@ function getPreviewGpuEffectFrameCache(
   return cache
 }
 
+export function clearPreviewGpuEffectFrameCache(rctx?: ItemRenderContext, itemId?: string): void {
+  if (!rctx) return
+  const cache = previewGpuEffectFrameCache.get(rctx)
+  if (!cache) return
+  if (itemId) {
+    cache.delete(itemId)
+  } else {
+    cache.clear()
+  }
+}
+
 function getFreshPreviewGpuEffectFrame(
   rctx: ItemRenderContext,
   itemId: string,
@@ -398,6 +409,7 @@ export function renderPreviewVideoGpuEffectsToCanvas(
 
   const enabledEffects = effects.filter((effect) => effect.enabled)
   if (enabledEffects.length === 0) {
+    getPreviewGpuEffectFrameCache(rctx).delete(item.id)
     recordFastPath('no-enabled-effects')
     return null
   }

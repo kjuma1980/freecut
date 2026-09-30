@@ -506,7 +506,8 @@ export const EffectsSection = memo(function EffectsSection({
     visualItems.forEach((item) => {
       clearEffects(item.id)
     })
-  }, [clearEffects, visualItems])
+    clearPreview()
+  }, [clearEffects, clearPreview, visualItems])
 
   // Effect picker popover state
   const [pickerOpen, setPickerOpen] = useState(false)
