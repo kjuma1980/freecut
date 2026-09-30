@@ -679,6 +679,7 @@
     },
     "mediaSidebar": {
       "media": "Media",
+      "audio": "Audio",
       "text": "Text",
       "shapes": "Shapes",
       "effects": "Effects",

@@ -20,7 +20,17 @@ import {
   Captions,
   Sticker,
   WandSparkles,
+  AudioWaveform,
+  Eye,
+  EyeOff,
+  Check,
+  X,
+  Sparkles,
 } from 'lucide-react'
+import { toast } from 'sonner'
+import { useGizmoStore } from '@/features/editor/deps/preview'
+import { AudioTabPanel } from './audio-tab'
+import type { ItemEffect } from '@/types/effects'
 import { motion } from 'motion/react'
 import { usePrefersReducedMotion } from '@/shared/hooks/use-prefers-reduced-motion'
 import { Button } from '@/components/ui/button'
@@ -54,9 +64,9 @@ import {
 import { addAdjustmentLayer } from '../utils/add-adjustment-layer'
 import type { TextItem, ShapeItem, ShapeType } from '@/types/timeline'
 import { useMaskEditorStore } from '@/features/editor/deps/preview'
-import type { VisualEffect, GpuEffect } from '@/types/effects'
+import type { VisualEffect } from '@/types/effects'
 import { EFFECT_PRESETS } from '@/types/effects'
-import { getGpuEffectDefaultParams } from '@/infrastructure/gpu-effects'
+import { getGpuEffect, getGpuEffectDefaultParams } from '@/infrastructure/gpu-effects'
 import { EffectThumbnail, useGpuEffectPreviewData } from '@/features/editor/deps/effects-contract'
 import { createLogger } from '@/shared/logging/logger'
 import { useSettingsStore } from '@/features/editor/deps/settings'
@@ -432,8 +442,7 @@ export const MediaSidebar = memo(function MediaSidebar() {
     const { tracks, fps, addItemOnNewTrack } = useTimelineStore.getState()
     const { activeTrackId, selectItems, setActiveTrack } = useSelectionStore.getState()
     const currentProject = useProjectStore.getState().currentProject
-    const activeCompositionId =
-      useCompositionNavigationStore.getState().activeCompositionId
+    const activeCompositionId = useCompositionNavigationStore.getState().activeCompositionId
     const activeComposition = activeCompositionId
       ? useCompositionsStore.getState().getComposition(activeCompositionId)
       : undefined
@@ -476,46 +485,161 @@ export const MediaSidebar = memo(function MediaSidebar() {
     addAdjustmentLayer(effects, label)
   }, [])
 
-  // Create adjustment layer with preset effects
-  const handleAddPreset = useCallback(
+  // Effect inspection & preview state
+  const [inspectingEffect, setInspectingEffect] = useState<{
+    kind: 'preset' | 'gpu'
+    id: string
+    name: string
+    effects: VisualEffect[]
+  } | null>(null)
+  const [isPreviewingOnPlayer, setIsPreviewingOnPlayer] = useState(false)
+
+  const selectedItemIds = useSelectionStore((s) => s.selectedItemIds)
+  const timelineItems = useTimelineStore((s) => s.items)
+  const hasSelectedVisualClip = useMemo(() => {
+    return selectedItemIds.some((id) => {
+      const item = timelineItems.find((i) => i.id === id)
+      return item && item.type !== 'audio'
+    })
+  }, [timelineItems, selectedItemIds])
+
+  // Clear live preview when switching away from effects tab or unmounting
+  useEffect(() => {
+    if (activeTab !== 'effects') {
+      if (isPreviewingOnPlayer) {
+        useGizmoStore.getState().clearPreview()
+        setIsPreviewingOnPlayer(false)
+      }
+      setInspectingEffect(null)
+    }
+  }, [activeTab, isPreviewingOnPlayer])
+
+  useEffect(() => {
+    return () => {
+      useGizmoStore.getState().clearPreview()
+    }
+  }, [])
+
+  // Select preset for inspection instead of arbitrary auto-insertion
+  const handleSelectPresetForInspection = useCallback(
     (presetId: string) => {
       const preset = EFFECT_PRESETS.find((p) => p.id === presetId)
       if (!preset) return
-      handleAddAdjustmentLayer(preset.effects, preset.name)
-    },
-    [handleAddAdjustmentLayer],
-  )
-
-  // Add a single GPU effect ââ‚¬” to selected clips, or as adjustment layer if nothing selected
-  const handleAddGpuEffect = useCallback(
-    (gpuEffectId: string) => {
-      const { selectedItemIds } = useSelectionStore.getState()
-      const { items, addEffect } = useTimelineStore.getState()
-
-      // Find selected visual items (not audio)
-      const visualIds = selectedItemIds.filter((id) => {
-        const item = items.find((i) => i.id === id)
-        return item && item.type !== 'audio'
-      })
-
-      if (visualIds.length > 0) {
-        const defaults = getGpuEffectDefaultParams(gpuEffectId)
-        const effect: GpuEffect = {
-          type: 'gpu-effect',
-          gpuEffectType: gpuEffectId,
-          params: defaults,
-        }
-        visualIds.forEach((id) => addEffect(id, effect))
-      } else {
-        // No visual selection ââ‚¬” create adjustment layer with this effect
-        const defaults = getGpuEffectDefaultParams(gpuEffectId)
-        handleAddAdjustmentLayer([
-          { type: 'gpu-effect', gpuEffectType: gpuEffectId, params: defaults },
-        ])
+      if (isPreviewingOnPlayer) {
+        useGizmoStore.getState().clearPreview()
+        setIsPreviewingOnPlayer(false)
       }
+      setInspectingEffect({
+        kind: 'preset',
+        id: preset.id,
+        name: preset.name,
+        effects: preset.effects,
+      })
     },
-    [handleAddAdjustmentLayer],
+    [isPreviewingOnPlayer],
   )
+
+  // Select GPU effect for inspection instead of arbitrary auto-insertion
+  const handleSelectGpuEffectForInspection = useCallback(
+    (gpuEffectId: string) => {
+      const defaults = getGpuEffectDefaultParams(gpuEffectId)
+      const def = getGpuEffect(gpuEffectId)
+      const effectName = def?.name || gpuEffectId
+      if (isPreviewingOnPlayer) {
+        useGizmoStore.getState().clearPreview()
+        setIsPreviewingOnPlayer(false)
+      }
+      setInspectingEffect({
+        kind: 'gpu',
+        id: gpuEffectId,
+        name: effectName,
+        effects: [{ type: 'gpu-effect', gpuEffectType: gpuEffectId, params: defaults }],
+      })
+    },
+    [isPreviewingOnPlayer],
+  )
+
+  const handleCloseEffectInspector = useCallback(() => {
+    if (isPreviewingOnPlayer) {
+      useGizmoStore.getState().clearPreview()
+      setIsPreviewingOnPlayer(false)
+    }
+    setInspectingEffect(null)
+  }, [isPreviewingOnPlayer])
+
+  // Toggle live effect preview on video player
+  const handleTogglePlayerPreview = useCallback(() => {
+    if (!inspectingEffect) return
+
+    if (isPreviewingOnPlayer) {
+      useGizmoStore.getState().clearPreview()
+      setIsPreviewingOnPlayer(false)
+      return
+    }
+
+    const { selectedItemIds } = useSelectionStore.getState()
+    const { items } = useTimelineStore.getState()
+    const visualItems = items.filter((i) => i.type !== 'audio')
+
+    let targetItem = visualItems.find((i) => selectedItemIds.includes(i.id))
+    if (!targetItem && visualItems.length > 0) {
+      targetItem = visualItems[0]
+    }
+
+    if (!targetItem) {
+      toast.info('Añade un video o imagen a la línea de tiempo para previsualizar')
+      return
+    }
+
+    const previewEffects: ItemEffect[] = inspectingEffect.effects.map((eff, index) => ({
+      id: `preview-effect-${index}`,
+      effect: eff,
+      enabled: true,
+    }))
+
+    useGizmoStore.getState().setEffectsPreviewNew({ [targetItem.id]: previewEffects })
+    setIsPreviewingOnPlayer(true)
+  }, [inspectingEffect, isPreviewingOnPlayer])
+
+  // Explicitly apply to selected clip
+  const handleApplyToSelectedClip = useCallback(() => {
+    if (!inspectingEffect) return
+    const { selectedItemIds } = useSelectionStore.getState()
+    const { items, addEffect } = useTimelineStore.getState()
+    const visualIds = selectedItemIds.filter((id) => {
+      const item = items.find((i) => i.id === id)
+      return item && item.type !== 'audio'
+    })
+
+    if (visualIds.length === 0) {
+      toast.warning('Selecciona un clip en la línea de tiempo primero')
+      return
+    }
+
+    visualIds.forEach((id) => {
+      inspectingEffect.effects.forEach((eff) => addEffect(id, eff))
+    })
+
+    if (isPreviewingOnPlayer) {
+      useGizmoStore.getState().clearPreview()
+      setIsPreviewingOnPlayer(false)
+    }
+    setInspectingEffect(null)
+    toast.success(`Efecto "${inspectingEffect.name}" aplicado al clip`)
+  }, [inspectingEffect, isPreviewingOnPlayer])
+
+  // Explicitly insert as timeline block (adjustment layer)
+  const handleInsertAsTimelineBlock = useCallback(() => {
+    if (!inspectingEffect) return
+    handleAddAdjustmentLayer(inspectingEffect.effects, inspectingEffect.name)
+
+    if (isPreviewingOnPlayer) {
+      useGizmoStore.getState().clearPreview()
+      setIsPreviewingOnPlayer(false)
+    }
+    setInspectingEffect(null)
+    toast.success(`Bloque "${inspectingEffect.name}" añadido a la línea de tiempo`)
+  }, [handleAddAdjustmentLayer, inspectingEffect, isPreviewingOnPlayer])
 
   const { gpuCategories, triggerPreviews } = useGpuEffectPreviewData()
   // Which effect/preset tile is hovered — drives its live sweep animation.
@@ -537,6 +661,7 @@ export const MediaSidebar = memo(function MediaSidebar() {
   // Category items for the vertical nav
   const categories = [
     { id: 'media' as const, icon: Film, label: t('editor.mediaSidebar.media') },
+    { id: 'audio' as const, icon: AudioWaveform, label: t('editor.mediaSidebar.audio', 'Audio') },
     { id: 'text' as const, icon: Type, label: t('editor.mediaSidebar.text') },
     { id: 'shapes' as const, icon: Pentagon, label: t('editor.mediaSidebar.shapes') },
     { id: 'effects' as const, icon: Layers, label: t('editor.mediaSidebar.effects') },
@@ -723,6 +848,13 @@ export const MediaSidebar = memo(function MediaSidebar() {
               className={`min-h-0 flex-1 overflow-hidden ${activeTab === 'media' ? 'block' : 'hidden'}`}
             >
               <MediaLibrary />
+            </div>
+
+            {/* Audio Tab - Project Audio & SFX */}
+            <div
+              className={`min-h-0 flex-1 overflow-hidden ${activeTab === 'audio' ? 'block' : 'hidden'}`}
+            >
+              {activeTab === 'audio' && <AudioTabPanel />}
             </div>
 
             {/* Text Tab */}
@@ -1023,6 +1155,85 @@ export const MediaSidebar = memo(function MediaSidebar() {
               className={`min-h-0 flex-1 overflow-y-auto p-3 ${activeTab === 'effects' ? 'block' : 'hidden'}`}
             >
               <div className="space-y-3">
+                {/* Active Effect Inspection & Preview Card */}
+                {inspectingEffect && (
+                  <div className="rounded-lg border border-primary/40 bg-secondary/30 p-3 shadow-md space-y-2.5">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-1.5 font-medium text-xs text-foreground min-w-0">
+                        <Sparkles className="w-3.5 h-3.5 text-primary shrink-0" />
+                        <span className="truncate">{inspectingEffect.name}</span>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={handleCloseEffectInspector}
+                        className="rounded p-1 text-muted-foreground hover:bg-secondary hover:text-foreground"
+                        title="Cerrar vista previa"
+                      >
+                        <X className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+
+                    <div className="w-full aspect-video rounded overflow-hidden border border-border bg-black/40">
+                      <EffectThumbnail
+                        effects={inspectingEffect.effects}
+                        active={true}
+                        className="w-full h-full object-cover"
+                      />
+                    </div>
+
+                    <div className="space-y-1.5 pt-1">
+                      <Button
+                        size="sm"
+                        variant={isPreviewingOnPlayer ? 'default' : 'outline'}
+                        onClick={handleTogglePlayerPreview}
+                        className="w-full h-7 text-xs gap-1.5"
+                      >
+                        {isPreviewingOnPlayer ? (
+                          <>
+                            <EyeOff className="w-3.5 h-3.5" />
+                            <span>Desactivar Preview en Reproductor</span>
+                          </>
+                        ) : (
+                          <>
+                            <Eye className="w-3.5 h-3.5" />
+                            <span>Previsualizar en Reproductor</span>
+                          </>
+                        )}
+                      </Button>
+
+                      <Button
+                        size="sm"
+                        variant="secondary"
+                        onClick={handleApplyToSelectedClip}
+                        disabled={!hasSelectedVisualClip}
+                        className="w-full h-7 text-xs gap-1.5"
+                        title={
+                          !hasSelectedVisualClip
+                            ? 'Selecciona un clip en la línea de tiempo'
+                            : undefined
+                        }
+                      >
+                        <Check className="w-3.5 h-3.5" />
+                        <span>
+                          {hasSelectedVisualClip
+                            ? 'Aplicar al Clip Seleccionado'
+                            : 'Aplicar (Selecciona un clip)'}
+                        </span>
+                      </Button>
+
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={handleInsertAsTimelineBlock}
+                        className="w-full h-7 text-xs gap-1.5"
+                      >
+                        <Layers className="w-3.5 h-3.5" />
+                        <span>Insertar en Línea de Tiempo como Bloque</span>
+                      </Button>
+                    </div>
+                  </div>
+                )}
+
                 {/* Blank Adjustment Layer */}
                 <button
                   draggable={true}
@@ -1069,7 +1280,7 @@ export const MediaSidebar = memo(function MediaSidebar() {
                         }
                         onClick={() => {
                           if (shouldSuppressGeneratedItemClick()) return
-                          handleAddPreset(preset.id)
+                          handleSelectPresetForInspection(preset.id)
                         }}
                         className="flex flex-col items-center gap-1 p-1.5 rounded-md border border-border bg-secondary/30 hover:bg-secondary/50 hover:border-primary/50 transition-[transform,background-color,border-color,color] duration-150 active:scale-[0.98] group"
                       >
@@ -1113,7 +1324,7 @@ export const MediaSidebar = memo(function MediaSidebar() {
                           onMouseLeave={() => setHoveredEffectKey((k) => (k === def.id ? null : k))}
                           onClick={() => {
                             if (shouldSuppressGeneratedItemClick()) return
-                            handleAddGpuEffect(def.id)
+                            handleSelectGpuEffectForInspection(def.id)
                           }}
                           className="flex flex-col items-center gap-1 p-1.5 rounded-md border border-border bg-secondary/30 hover:bg-secondary/50 hover:border-primary/50 transition-[transform,background-color,border-color,color] duration-150 active:scale-[0.98] group"
                         >

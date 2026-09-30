@@ -679,6 +679,7 @@
     },
     "mediaSidebar": {
       "media": "Medios",
+      "audio": "Audio",
       "text": "Texto",
       "shapes": "Formas",
       "effects": "Efectos",

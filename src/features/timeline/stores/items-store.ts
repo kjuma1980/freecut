@@ -118,6 +118,7 @@ interface ItemsActions {
   ) => void
   _removeEffect: (itemId: string, effectId: string) => void
   _toggleEffect: (itemId: string, effectId: string) => void
+  _clearEffects: (itemId: string) => void
   _setItemEffects: (updates: Array<{ itemId: string; effects: ItemEffect[] }>) => void
 }
 
@@ -874,6 +875,9 @@ export const useItemsStore = create<ItemsState & ItemsActions>()((set, get) => (
         effects.filter((effectItem) => effectItem.id !== effectId),
       ),
     ),
+
+  // Clear all effects
+  _clearEffects: (itemId) => set((state) => updateVisualItemEffects(state, itemId, () => [])),
 
   // Toggle effect
   _toggleEffect: (itemId, effectId) =>
