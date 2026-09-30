@@ -27,6 +27,8 @@ import {
   X,
   Sparkles,
   Trash2,
+  AlertTriangle,
+  Eraser,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { useGizmoStore } from '@/features/editor/deps/preview'
@@ -506,6 +508,14 @@ export const MediaSidebar = memo(function MediaSidebar() {
     return selectedVisualItems.reduce((acc, item) => acc + (item.effects?.length || 0), 0)
   }, [selectedVisualItems])
 
+  const totalProjectEffectsCount = useMemo(() => {
+    return timelineItems.reduce((acc, item) => acc + (item.effects?.length || 0), 0)
+  }, [timelineItems])
+
+  const adjustmentLayerItems = useMemo(() => {
+    return timelineItems.filter((i) => i.type === 'adjustment')
+  }, [timelineItems])
+
   const hasSelectedVisualClip = selectedVisualItems.length > 0
 
   const handleClearSelectedClipEffects = useCallback(() => {
@@ -513,22 +523,84 @@ export const MediaSidebar = memo(function MediaSidebar() {
       toast.warning('Selecciona un clip en la línea de tiempo primero')
       return
     }
-    const { clearEffects, items } = useTimelineStore.getState()
+    const { clearEffects } = useTimelineStore.getState()
     selectedVisualItems.forEach((item) => {
       clearEffects(item.id)
     })
-    if (isPreviewingOnPlayer) {
-      useGizmoStore.getState().clearPreview()
-      setIsPreviewingOnPlayer(false)
-    }
+    useGizmoStore.getState().clearPreview()
+    setIsPreviewingOnPlayer(false)
+    setInspectingEffect(null)
     const currentFrame = usePlaybackStore.getState().currentFrame
+    const { items } = useTimelineStore.getState()
     usePreviewBridgeStore.getState().requestPostEditWarm(
       currentFrame,
       items.map((i) => i.id),
     )
     usePreviewBridgeStore.getState().setDisplayedFrame(null)
-    toast.success('Efectos eliminados del clip')
-  }, [selectedVisualItems, isPreviewingOnPlayer])
+    toast.success('Efectos eliminados del clip seleccionado')
+  }, [selectedVisualItems])
+
+  const handleDeleteAdjustmentLayers = useCallback(() => {
+    const { removeItems, items } = useTimelineStore.getState()
+    const adjItems = items.filter((i) => i.type === 'adjustment')
+    if (adjItems.length === 0) return
+    removeItems(adjItems.map((adj) => adj.id))
+    useGizmoStore.getState().clearPreview()
+    setIsPreviewingOnPlayer(false)
+    setInspectingEffect(null)
+    const currentFrame = usePlaybackStore.getState().currentFrame
+    const freshItems = useTimelineStore.getState().items
+    usePreviewBridgeStore.getState().requestPostEditWarm(
+      currentFrame,
+      freshItems.map((i) => i.id),
+    )
+    usePreviewBridgeStore.getState().setDisplayedFrame(null)
+    toast.success(`${adjItems.length} capa(s) de ajuste eliminada(s) de la línea de tiempo`)
+  }, [])
+
+  const handleClearAllProjectEffects = useCallback(() => {
+    const { items, clearEffects, removeItems } = useTimelineStore.getState()
+    let clearedCount = 0
+
+    // 1. Remove all adjustment layers
+    const adjItemIds = items.filter((item) => item.type === 'adjustment').map((item) => item.id)
+    const removedLayersCount = adjItemIds.length
+    if (adjItemIds.length > 0) {
+      removeItems(adjItemIds)
+    }
+
+    // 2. Clear effects on all items
+    items.forEach((item) => {
+      if (item.effects && item.effects.length > 0) {
+        clearEffects(item.id)
+        clearedCount += item.effects.length
+      }
+    })
+
+    // 3. Force clean gizmo store preview
+    useGizmoStore.getState().clearPreview()
+    setIsPreviewingOnPlayer(false)
+    setInspectingEffect(null)
+
+    // 4. Invalidate frame caches & force player re-render
+    const currentFrame = usePlaybackStore.getState().currentFrame
+    const freshItems = useTimelineStore.getState().items
+    usePreviewBridgeStore.getState().requestPostEditWarm(
+      currentFrame,
+      freshItems.map((i) => i.id),
+    )
+    usePreviewBridgeStore.getState().setDisplayedFrame(null)
+
+    if (clearedCount > 0 || removedLayersCount > 0) {
+      toast.success(
+        `Video restablecido: ${clearedCount} efecto(s) eliminados${
+          removedLayersCount > 0 ? ` y ${removedLayersCount} capa(s) de ajuste quitadas` : ''
+        }.`,
+      )
+    } else {
+      toast.info('Video restablecido y memoria caché de efectos purgada.')
+    }
+  }, [])
 
   // Clear live preview when switching away from effects tab or unmounting
   useEffect(() => {
@@ -1217,59 +1289,88 @@ export const MediaSidebar = memo(function MediaSidebar() {
               className={`min-h-0 flex-1 overflow-y-auto p-3 ${activeTab === 'effects' ? 'block' : 'hidden'}`}
             >
               <div className="space-y-3">
-                {/* Selected Clip Effects Status & Clear Button */}
-                {selectedVisualItems.length > 0 ? (
-                  <div className="rounded-lg border border-border bg-secondary/30 p-2.5 space-y-2">
-                    <div className="flex items-center justify-between text-xs">
-                      <div className="flex items-center gap-1.5 min-w-0">
-                        <Film className="w-3.5 h-3.5 text-primary shrink-0" />
-                        <span className="font-medium text-foreground truncate max-w-[150px]">
-                          {selectedVisualItems[0]?.label || 'Clip seleccionado'}
+                {/* Adjustment Layer Alert if active on timeline */}
+                {adjustmentLayerItems.length > 0 && (
+                  <div className="rounded-lg border border-amber-500/50 bg-amber-500/10 p-2.5 space-y-2">
+                    <div className="flex items-start gap-2">
+                      <AlertTriangle className="w-4 h-4 text-amber-500 shrink-0 mt-0.5" />
+                      <div className="text-xs space-y-0.5">
+                        <span className="font-semibold text-amber-500 block">
+                          Capa de Ajuste activa en la línea de tiempo
+                        </span>
+                        <span className="text-muted-foreground text-[10px] block leading-tight">
+                          Hay {adjustmentLayerItems.length} capa(s) de ajuste aplicando efectos a
+                          los videos inferiores.
                         </span>
                       </div>
-                      <span className="text-[10px] text-muted-foreground bg-secondary px-1.5 py-0.5 rounded shrink-0">
-                        {selectedVisualItemEffectsCount}{' '}
-                        {selectedVisualItemEffectsCount === 1 ? 'efecto' : 'efectos'}
-                      </span>
                     </div>
-
-                    {selectedVisualItemEffectsCount > 0 && (
-                      <Button
-                        size="sm"
-                        variant="destructive"
-                        onClick={handleClearSelectedClipEffects}
-                        className="w-full h-7 text-xs gap-1.5"
-                      >
-                        <Trash2 className="w-3.5 h-3.5" />
-                        <span>Limpiar todos los efectos ({selectedVisualItemEffectsCount})</span>
-                      </Button>
-                    )}
-
-                    {selectedVisualItemEffectsCount === 0 && isPreviewingOnPlayer && (
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        onClick={handleCloseEffectInspector}
-                        className="w-full h-7 text-xs gap-1.5 text-muted-foreground hover:text-foreground"
-                      >
-                        <X className="w-3.5 h-3.5" />
-                        <span>Quitar preview del reproductor</span>
-                      </Button>
-                    )}
-
-                    {selectedVisualItemEffectsCount === 0 && !isPreviewingOnPlayer && (
-                      <div className="text-[10px] text-muted-foreground">
-                        Sin efectos aplicados en el clip
-                      </div>
-                    )}
-                  </div>
-                ) : (
-                  <div className="rounded-lg border border-dashed border-border p-2 text-center">
-                    <span className="text-[10px] text-muted-foreground">
-                      Selecciona un clip en la línea de tiempo para ver o limpiar sus efectos
-                    </span>
+                    <Button
+                      size="sm"
+                      variant="destructive"
+                      onClick={handleDeleteAdjustmentLayers}
+                      className="w-full h-7 text-xs gap-1.5"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                      <span>Eliminar Capa(s) de Ajuste</span>
+                    </Button>
                   </div>
                 )}
+
+                {/* Permanent Effects Action Toolbar - ALWAYS VISIBLE */}
+                <div className="rounded-lg border border-border bg-card p-2.5 space-y-2 shadow-sm">
+                  <div className="flex items-center justify-between text-xs">
+                    <div className="flex items-center gap-1.5 min-w-0">
+                      <Sparkles className="w-3.5 h-3.5 text-primary shrink-0" />
+                      <span className="font-semibold text-foreground truncate">
+                        {selectedVisualItems.length > 0
+                          ? selectedVisualItems[0]?.label || 'Clip seleccionado'
+                          : 'Control de Efectos'}
+                      </span>
+                    </div>
+                    <span className="text-[10px] text-muted-foreground bg-secondary px-1.5 py-0.5 rounded shrink-0">
+                      {selectedVisualItems.length > 0
+                        ? `${selectedVisualItemEffectsCount} en clip`
+                        : `${totalProjectEffectsCount} en proyecto`}
+                    </span>
+                  </div>
+
+                  {selectedVisualItems.length > 0 && (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={handleClearSelectedClipEffects}
+                      className="w-full h-7 text-xs gap-1.5 text-destructive hover:bg-destructive/10 hover:text-destructive border-destructive/30"
+                      title="Elimina todos los efectos del clip actualmente seleccionado"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                      <span>Limpiar efectos del clip ({selectedVisualItemEffectsCount})</span>
+                    </Button>
+                  )}
+
+                  {isPreviewingOnPlayer && (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={handleCloseEffectInspector}
+                      className="w-full h-7 text-xs gap-1.5 text-muted-foreground hover:text-foreground"
+                    >
+                      <X className="w-3.5 h-3.5" />
+                      <span>Quitar preview del reproductor</span>
+                    </Button>
+                  )}
+
+                  {/* Red Master Clear / Reset Button - ALWAYS VISIBLE */}
+                  <Button
+                    size="sm"
+                    variant="destructive"
+                    onClick={handleClearAllProjectEffects}
+                    className="w-full h-8 text-xs font-semibold gap-1.5 bg-red-600 hover:bg-red-700 text-white shadow-sm"
+                    title="Elimina todos los efectos de todos los clips, capas de ajuste y purga la caché para restaurar el video original limpio"
+                  >
+                    <Eraser className="w-3.5 h-3.5" />
+                    <span>Restablecer Video (Eliminar todos los efectos)</span>
+                  </Button>
+                </div>
                 {/* Active Effect Inspection & Preview Card */}
                 {inspectingEffect && (
                   <div className="rounded-lg border border-primary/40 bg-secondary/30 p-3 shadow-md space-y-2.5">

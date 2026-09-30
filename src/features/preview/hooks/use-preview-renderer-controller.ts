@@ -1372,7 +1372,7 @@ export function usePreviewRendererController({
               }
 
               try {
-                renderer.invalidateFrameCache?.({ frames: warmRunwayFrames })
+                renderer.invalidateFrameCache?.()
               } catch {
                 // Best effort
               }

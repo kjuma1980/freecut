@@ -13,6 +13,8 @@ import {
   useSpatialEffectEditorStore,
   useThrottledFrame,
 } from '@/features/effects/deps/preview-contract'
+import { usePlaybackStore } from '@/shared/state/playback'
+import { usePreviewBridgeStore } from '@/shared/state/preview-bridge'
 import { PropertySection } from '@/shared/ui/property-controls'
 import {
   GpuEffectPanel,
@@ -507,6 +509,13 @@ export const EffectsSection = memo(function EffectsSection({
       clearEffects(item.id)
     })
     clearPreview()
+    const currentFrame = usePlaybackStore.getState().currentFrame
+    const { items } = useTimelineStore.getState()
+    usePreviewBridgeStore.getState().requestPostEditWarm(
+      currentFrame,
+      items.map((i) => i.id),
+    )
+    usePreviewBridgeStore.getState().setDisplayedFrame(null)
   }, [clearEffects, clearPreview, visualItems])
 
   // Effect picker popover state
@@ -776,33 +785,27 @@ export const EffectsSection = memo(function EffectsSection({
           document.body,
         )}
       {effects.length > 0 && (
-        <>
-          <Button
-            variant="outline"
-            size="sm"
-            className="h-7 px-2"
-            onClick={handleToggleAll}
-            title={
-              allEffectsEnabled ? t('effects.section.disableAll') : t('effects.section.enableAll')
-            }
-          >
-            {allEffectsEnabled ? (
-              <EyeOff className="w-3.5 h-3.5" />
-            ) : (
-              <Eye className="w-3.5 h-3.5" />
-            )}
-          </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            className="h-7 px-2 text-destructive hover:bg-destructive/10 hover:text-destructive"
-            onClick={handleClearAll}
-            title={t('effects.section.clearAll', 'Limpiar todos los efectos')}
-          >
-            <Trash2 className="w-3.5 h-3.5" />
-          </Button>
-        </>
+        <Button
+          variant="outline"
+          size="sm"
+          className="h-7 px-2"
+          onClick={handleToggleAll}
+          title={
+            allEffectsEnabled ? t('effects.section.disableAll') : t('effects.section.enableAll')
+          }
+        >
+          {allEffectsEnabled ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+        </Button>
       )}
+      <Button
+        variant="outline"
+        size="sm"
+        className="h-7 px-2 text-destructive hover:bg-destructive/10 hover:text-destructive"
+        onClick={handleClearAll}
+        title={t('effects.section.clearAll', 'Limpiar todos los efectos')}
+      >
+        <Trash2 className="w-3.5 h-3.5" />
+      </Button>
     </div>
   )
 
